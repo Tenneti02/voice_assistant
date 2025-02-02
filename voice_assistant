@@ -1,0 +1,197 @@
+import os
+import datetime
+import pyttsx3
+import speech_recognition as sr
+import pyaudio
+import struct
+import platform
+import subprocess
+import webbrowser
+import pvporcupine
+from langchain_ollama import OllamaLLM
+from langchain.prompts import ChatPromptTemplate
+
+# Set the correct model path and keyword path
+MODEL_PATH = "C:/Users/Tenneti/PycharmProjects/Pythonchatbot/porcupine_params.pv"
+KEYWORD_PATH = "C:/Users/Tenneti/PycharmProjects/Pythonchatbot/twilight_en_windows_v3_0_0.ppn"
+
+# Initialize TTS and Speech Recognition
+recognizer = sr.Recognizer()
+tts_engine = pyttsx3.init()
+
+# Initialize Ollama model
+template = """
+Answer the question below.
+Here is the conversation history: {context}
+Question: {question}
+Answer:
+"""
+model = OllamaLLM(model="llama3")
+prompt = ChatPromptTemplate.from_template(template)
+chain = prompt | model
+
+# Function to speak the response
+def speak_response(response_text):
+    print(f"Twilight: {response_text}")
+    tts_engine.say(response_text)
+    tts_engine.runAndWait()
+
+# Function to create a file
+def create_file(file_name, content=""):
+    try:
+        with open(file_name, "w") as file:
+            file.write(content)
+        return f"File '{file_name}' has been created successfully."
+    except Exception as e:
+        return f"Failed to create file '{file_name}': {e}"
+
+# Function to delete a file
+def delete_file(file_name):
+    try:
+        if os.path.exists(file_name):
+            os.remove(file_name)
+            return f"File '{file_name}' has been deleted."
+        else:
+            return f"File '{file_name}' does not exist."
+    except Exception as e:
+        return f"Failed to delete file '{file_name}': {e}"
+
+# Function to read a file
+def read_file(file_name):
+    try:
+        if os.path.exists(file_name):
+            with open(file_name, "r") as file:
+                content = file.read()
+            return content if content else f"File '{file_name}' is empty."
+        else:
+            return f"File '{file_name}' does not exist."
+    except Exception as e:
+        return f"Failed to read file '{file_name}': {e}"
+
+# Function to write to a file
+def write_file(file_name, content):
+    try:
+        with open(file_name, "a") as file:  # Append mode
+            file.write(content + "\n")
+        return f"Content has been added to file '{file_name}'."
+    except Exception as e:
+        return f"Failed to write to file '{file_name}': {e}"
+
+# Function to locate a file
+def locate_file(file_name):
+    if os.path.exists(file_name):
+        return f"The file '{file_name}' is located at: {os.path.abspath(file_name)}"
+    else:
+        return f"The file '{file_name}' doesn't exist."
+
+# Function to handle input/output based on mode
+def handle_conversation(mode="text"):
+    context = "This is the start of the conversation history."  # Initialize context
+    print("Welcome ,I am  TWILIGHT! Type 'exit' to quit.\n")
+
+    while True:
+        # Get input based on the mode
+        if mode == "voice":
+            print("Listening for your command...")
+            with sr.Microphone() as source:
+                audio = recognizer.listen(source)
+                try:
+                    spoken_command = recognizer.recognize_google(audio)
+                    print(f"You said: {spoken_command}")
+                except sr.UnknownValueError:
+                    speak_response("Sorry, I didn't catch that.")
+                    continue
+                except sr.RequestError as e:
+                    speak_response(f"Could not request results; {e}")
+                    continue
+        else:
+            spoken_command = input("You: ")
+            if not spoken_command.strip():
+                continue
+
+        # Exit condition
+        if "exit" in spoken_command.lower():
+            if mode == "voice":
+                speak_response("Goodbye!")
+            print("Exiting Twilight. Goodbye!")
+            break
+
+        # Handle time-related queries
+        if "time" in spoken_command.lower():
+            current_time = datetime.datetime.now().strftime("%H:%M:%S")
+            response = f"The current time is {current_time}."
+            if mode == "voice":
+                speak_response(response)
+            else:
+                print(response)
+            continue
+
+        # Handle file-related queries
+        if "create file" in spoken_command.lower():
+            file_name = input("Enter the file name to create: ")
+            content = input("Enter the content for the file (leave blank for empty file): ")
+            response = create_file(file_name, content)
+        elif "delete file" in spoken_command.lower():
+            file_name = input("Enter the file name to delete: ")
+            response = delete_file(file_name)
+        elif "read file" in spoken_command.lower():
+            file_name = input("Enter the file name to read: ")
+            response = read_file(file_name)
+        elif "write file" in spoken_command.lower():
+            file_name = input("Enter the file name to write to: ")
+            content = input("Enter the content to write: ")
+            response = write_file(file_name, content)
+        elif "where is" in spoken_command.lower() and "file" in spoken_command.lower():
+            file_name = input("Enter the file name to locate: ")
+            response = locate_file(file_name)
+        else:
+            # Use Ollama to get a chatbot response
+            result = chain.invoke({"context": context, "question": spoken_command})
+            response = result
+            context += f"\nUser: {spoken_command}\nTwilight: {response}"
+
+        # Output response
+        if mode == "voice":
+            speak_response(response)
+        else:
+            print(f"Twilight: {response}")
+
+# Initialize wake word detection
+porcupine = pvporcupine.create(
+    model_path=MODEL_PATH,
+    keyword_paths=[KEYWORD_PATH],
+    access_key="mq0TpQPX81v3eKlAXYK0kxgQPUlwYsDjtSubBH2HLscB9CAvodH52A=="  # Replace with your Picovoice access key
+)
+
+audio_stream = pyaudio.PyAudio().open(
+    rate=porcupine.sample_rate,
+    channels=1,
+    format=pyaudio.paInt16,
+    input=True,
+    frames_per_buffer=porcupine.frame_length
+)
+
+print("Voice Assistant is listening for the wake word...")
+
+# Ask the user for the preferred mode
+mode = input("Choose your mode (voice/text): ").strip().lower()
+
+if mode not in ["voice", "text"]:
+    print("Invalid mode selected. Defaulting to text mode.")
+    mode = "text"
+
+# Start the assistant loop
+if mode == "voice":
+    while True:
+        pcm = audio_stream.read(porcupine.frame_length)
+        pcm = struct.unpack_from("h" * porcupine.frame_length, pcm)
+        keyword_index = porcupine.process(pcm)
+        if keyword_index >= 0:
+            print("Wake word detected! Listening for command...")
+            handle_conversation(mode="voice")
+else:
+    handle_conversation(mode="text")
+
+# Cleanup resources
+audio_stream.close()
+porcupine.delete()
